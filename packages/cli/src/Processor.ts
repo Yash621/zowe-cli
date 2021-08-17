@@ -9,8 +9,10 @@
 *
 */
 
-import { Imperative } from "@zowe/imperative";
+import { Imperative, ImperativeConfig } from "@zowe/imperative";
+import { homedir } from "os";
 import * as net from "net";
+import * as path from "path";
 import { DaemonClient } from "./DaemonClient";
 
 // TODO(Kelosky): handle prompting cases from login command
@@ -98,7 +100,8 @@ export class Processor {
      */
     public process() {
         if (this.mServer) {
-            this.mServer.listen(this.mPort, () => {
+            // this.mServer.listen(this.mPort, () => {
+            this.mServer.listen(path.join(homedir(), "zowe-daemon.sock"), () => {
                 Imperative.api.appLogger.debug(`daemon server bound ${this.mPort}`);
                 Imperative.console.info(`server bound ${this.mPort}`)
             });

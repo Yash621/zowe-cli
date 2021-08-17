@@ -9,6 +9,7 @@
 *
 */
 extern crate rpassword;
+extern crate dirs;
 use rpassword::read_password;
 
 use std::collections::HashMap;
@@ -17,8 +18,10 @@ use std::io::prelude::*;
 use std::io::BufReader;
 use std::io::{self, Write};
 use std::net::Shutdown;
-use std::net::TcpStream;
+// use std::net::TcpStream;
+use std::path::{Path};
 use std::str;
+use std::os::unix::net::UnixStream;
 
 // NOTE(Kelosky): these sync with imperative header values
 const X_ZOWE_DAEMON_HEADERS: &str = "x-zowe-daemon-headers";
@@ -58,7 +61,7 @@ fn main() -> std::io::Result<()> {
     Ok(())
 }
 
-fn run_zowe_command(mut args: String, port_string: &str) -> std::io::Result<()> {
+fn run_zowe_command(mut args: String, _port_string: &str) -> std::io::Result<()> {
     args.push_str(" --dcd ");
     let path = env::current_dir()?;
     args.push_str(path.to_str().unwrap());
@@ -69,10 +72,14 @@ fn run_zowe_command(mut args: String, port_string: &str) -> std::io::Result<()> 
         _resp = b" ";
     }
 
-    let mut daemon_host = "127.0.0.1:".to_owned();
-    daemon_host.push_str(&port_string);
+    let home_dir = dirs::home_dir().unwrap();
+    let daemon_sock_loc = Path::new(&home_dir).join("zowe-daemon.sock");
+    let mut stream = UnixStream::connect(&daemon_sock_loc).unwrap();
 
-    let mut stream = TcpStream::connect(daemon_host).unwrap();
+    // let mut daemon_host = "127.0.0.1:".to_owned();
+    // daemon_host.push_str(&port_string);
+
+    // let mut stream = TcpStream::connect(daemon_host).unwrap();
     stream.write(_resp).unwrap(); // write it
     let mut stream_clone = stream.try_clone().expect("clone failed");
 
