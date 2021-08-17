@@ -10,6 +10,8 @@
 */
 #[cfg(target_family = "windows")]
 extern crate uds_windows;
+#[cfg(target_family = "windows")]
+use uds_windows::UnixStream;
 
 #[cfg(target_family = "unix")]
 use std::os::unix::net::UnixStream;
