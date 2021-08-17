@@ -9,3 +9,6 @@ edition = "2018"
 [dependencies]
 rpassword = "5.0"
 dirs = "3.0.2"
+
+[target.'cfg(target_family = "windows")'.dependencies]
+uds_windows = "1.0.1"

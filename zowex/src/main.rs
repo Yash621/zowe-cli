@@ -8,6 +8,12 @@
 * Copyright Contributors to the Zowe Project.
 *
 */
+#[cfg(target_family = "windows")]
+extern crate uds_windows;
+
+#[cfg(target_family = "unix")]
+use std::os::unix::net::UnixStream;
+
 extern crate rpassword;
 extern crate dirs;
 use rpassword::read_password;
@@ -21,7 +27,6 @@ use std::net::Shutdown;
 // use std::net::TcpStream;
 use std::path::{Path};
 use std::str;
-use std::os::unix::net::UnixStream;
 
 // NOTE(Kelosky): these sync with imperative header values
 const X_ZOWE_DAEMON_HEADERS: &str = "x-zowe-daemon-headers";
