@@ -13,6 +13,7 @@ import { Imperative, ImperativeConfig } from "@zowe/imperative";
 import { homedir } from "os";
 import * as net from "net";
 import * as path from "path";
+import * as fs from "fs";
 import { DaemonClient } from "./DaemonClient";
 
 // TODO(Kelosky): handle prompting cases from login command
@@ -61,6 +62,15 @@ export class Processor {
     private mPort: number;
 
     /**
+     * Hold current socket location for the server
+     * @private
+     * @type {string}
+     * @memberof Processor
+     */
+    private mSocket: string;
+
+
+    /**
      * Indicator for whether or not to start the server
      * @private
      * @type {boolean}
@@ -101,9 +111,19 @@ export class Processor {
     public process() {
         if (this.mServer) {
             // this.mServer.listen(this.mPort, () => {
-            this.mServer.listen(path.join(homedir(), "zowe-daemon.sock"), () => {
-                Imperative.api.appLogger.debug(`daemon server bound ${this.mPort}`);
-                Imperative.console.info(`server bound ${this.mPort}`)
+            let socketLoc = path.join(homedir(), "zowe-daemon.sock");
+            if (process.platform === 'win32') {
+                socketLoc = socketLoc.replace(/^\//, '');
+                socketLoc = socketLoc.replace(/\//g, '-');
+                socketLoc = '\\\\.\\pipe\\' + socketLoc;
+            }
+            this.mSocket = socketLoc;
+
+            if (fs.existsSync(this.mSocket)) { fs.unlinkSync(this.mSocket); }
+            
+            this.mServer.listen(this.mSocket, () => {
+                Imperative.api.appLogger.debug(`daemon server bound ${this.mSocket}`);
+                Imperative.console.info(`server bound ${this.mSocket}`);
             });
         } else {
             Imperative.parse();
@@ -116,6 +136,8 @@ export class Processor {
      * @memberof Processor
      */
     private close() {
+        this.mServer.close();
+        fs.unlinkSync(this.mSocket);
         Imperative.api.appLogger.debug(`server closed`)
     }
 
@@ -126,7 +148,9 @@ export class Processor {
      * @memberof Processor
      */
     private error(err: Error) {
-        Imperative.api.appLogger.error(`daemon server error: ${err.message}`)
+        Imperative.api.appLogger.error(`daemon server error: ${err.message}`);
+        this.mServer.close();
+        fs.unlinkSync(this.mSocket);
         throw err;
     }
 

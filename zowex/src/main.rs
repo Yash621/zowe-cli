@@ -27,7 +27,7 @@ use std::io::BufReader;
 use std::io::{self, Write};
 use std::net::Shutdown;
 // use std::net::TcpStream;
-use std::path::{Path};
+use std::path::{Path, PathBuf};
 use std::str;
 
 // NOTE(Kelosky): these sync with imperative header values
@@ -51,6 +51,20 @@ const X_ZOWE_DAEMON_REPLY: &str = "x-zowe-daemon-reply:";
 //     >>     }
 //     >> } | Measure-Object -Property TotalSeconds -Average
 // 3.6393932 and 0.76156812 zowe average over 10 run sample = 2.87782508 sec faster on windows
+
+#[cfg(target_family = "unix")]
+fn get_sock_path() -> PathBuf {
+    let home_dir = dirs::home_dir().unwrap();
+    let daemon_sock_loc = Path::new(&home_dir).join("zowe-daemon.sock");
+    return daemon_sock_loc;
+}
+
+#[cfg(target_family = "windows")]
+fn get_sock_path() -> PathBuf {
+    let home_dir = dirs::home_dir().unwrap();
+    let daemon_sock_loc = Path::new("\\\\.\\pipe\\").join(&home_dir).join("zowe-daemon.sock");
+    return daemon_sock_loc;
+}
 
 fn main() -> std::io::Result<()> {
     // turn args into vector
@@ -79,8 +93,8 @@ fn run_zowe_command(mut args: String, _port_string: &str) -> std::io::Result<()>
         _resp = b" ";
     }
 
-    let home_dir = dirs::home_dir().unwrap();
-    let daemon_sock_loc = Path::new(&home_dir).join("zowe-daemon.sock");
+    let daemon_sock_loc = get_sock_path();
+    
     let mut stream = UnixStream::connect(&daemon_sock_loc).unwrap();
 
     // let mut daemon_host = "127.0.0.1:".to_owned();
