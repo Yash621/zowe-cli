@@ -9,11 +9,12 @@
 *
 */
 
-import { Imperative, ImperativeConfig } from "@zowe/imperative";
+import { Imperative } from "@zowe/imperative";
 import { homedir } from "os";
 import * as net from "net";
 import * as path from "path";
 import * as fs from "fs";
+import * as process from "process";
 import { DaemonClient } from "./DaemonClient";
 
 // TODO(Kelosky): handle prompting cases from login command
@@ -120,7 +121,13 @@ export class Processor {
             this.mSocket = socketLoc;
 
             if (fs.existsSync(this.mSocket)) { fs.unlinkSync(this.mSocket); }
-            
+
+            process.once('exit', this.close.bind(this));
+            process.once('SIGINT', this.close.bind(this));
+            process.once('SIGQUIT', this.close.bind(this));
+            process.once('SIGTERM', this.close.bind(this));
+            process.once('SIGILL', this.close.bind(this));
+
             this.mServer.listen(this.mSocket, () => {
                 Imperative.api.appLogger.debug(`daemon server bound ${this.mSocket}`);
                 Imperative.console.info(`server bound ${this.mSocket}`);
@@ -137,8 +144,9 @@ export class Processor {
      */
     private close() {
         this.mServer.close();
-        fs.unlinkSync(this.mSocket);
-        Imperative.api.appLogger.debug(`server closed`)
+        if (fs.existsSync(this.mSocket)) { fs.unlinkSync(this.mSocket); }
+        Imperative.api.appLogger.debug(`server closed`);
+        process.exit();
     }
 
     /**
@@ -150,7 +158,7 @@ export class Processor {
     private error(err: Error) {
         Imperative.api.appLogger.error(`daemon server error: ${err.message}`);
         this.mServer.close();
-        fs.unlinkSync(this.mSocket);
+        if (fs.existsSync(this.mSocket)) { fs.unlinkSync(this.mSocket); }
         throw err;
     }
 
