@@ -21,7 +21,12 @@ use std::process::{Command, Stdio};
 use std::str;
 use std::thread;
 use std::time::Duration;
+
+#[cfg(target_family = "unix")]
 use std::os::unix::net::UnixStream;
+
+#[cfg(target_family = "windows")]
+use uds_windows::UnixStream;
 
 extern crate pathsearch;
 use pathsearch::PathSearcher;
@@ -31,8 +36,6 @@ use rpassword::read_password;
 
 extern crate sysinfo;
 use sysinfo::{ProcessExt, System, SystemExt};
-
-const DEFAULT_PORT: i32 = 4000;
 
 const X_ZOWE_DAEMON_REPLY: &str = "daemon-client";
 
@@ -359,18 +362,6 @@ fn talk(message: &[u8], stream: &mut UnixStream) -> std::io::Result<()> {
     }
 
     Ok(())
-}
-
-fn get_port_string() -> String {
-    let mut _port = DEFAULT_PORT;
-
-    match env::var("ZOWE_DAEMON") {
-        // TODO(Kelosky): handle unwrap properly
-        Ok(val) => _port = val.parse::<i32>().unwrap(),
-        Err(_e) => _port = DEFAULT_PORT,
-    }
-    let port_string = _port.to_string();
-    return port_string;
 }
 
 fn get_socket_string() -> String {
