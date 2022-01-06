@@ -10,17 +10,18 @@
 */
 
 use serde::{Deserialize, Serialize};
+use dirs::home_dir;
 use std::env;
 use std::ffi::OsString;
 use std::io::prelude::*;
 use std::io::BufReader;
 use std::io::{self, Write};
 use std::net::Shutdown;
-use std::net::TcpStream;
 use std::process::{Command, Stdio};
 use std::str;
 use std::thread;
 use std::time::Duration;
+use std::os::unix::net::UnixStream;
 
 extern crate pathsearch;
 use pathsearch::PathSearcher;
@@ -173,24 +174,20 @@ fn run_daemon_command(mut args: String) -> std::io::Result<()> {
         _resp = b" ";
     }
 
-    // form our host, port, and connection strings
-    let daemon_host = "127.0.0.1".to_owned();
-    let port_string = get_port_string();
-
-    let mut stream = establish_connection(daemon_host, port_string)?;
+    let mut stream = establish_connection()?;
     Ok(talk(&_resp, &mut stream)?)
 }
 
-fn establish_connection(host: String, port: String) -> std::io::Result<TcpStream> {
+fn establish_connection() -> std::io::Result<UnixStream> {
     /* Attempt to make a TCP connection to the daemon.
      * Iterate to enable a slow system to start the daemon.
      */
-    let host_port_conn_str = format!("{}:{}", host, port);
+    let daemon_socket = get_socket_string();
     let mut conn_attempt = 1;
     let mut we_started_daemon = false;
     let mut cmd_to_show: String = String::new();
     let stream = loop {
-        let conn_result = TcpStream::connect(&host_port_conn_str);
+        let conn_result = UnixStream::connect(&daemon_socket);
         if let Ok(good_stream) = conn_result {
             // We made our connection. Break with the actual stream value
             break good_stream;
@@ -208,8 +205,8 @@ fn establish_connection(host: String, port: String) -> std::io::Result<TcpStream
                 cmd_to_show = start_daemon(&njs_zowe_path);
             } else {
                 if we_started_daemon {
-                    println!("The Zowe daemon that we started is not running on host = {} with port = {}.",
-                        host, port
+                    println!("The Zowe daemon that we started is not running on socket: {}.",
+                        daemon_socket
                     );
                     println!(
                         "Command used to start the Zowe daemon was:\n    {}\nTerminating.",
@@ -221,8 +218,8 @@ fn establish_connection(host: String, port: String) -> std::io::Result<TcpStream
         }
 
         if conn_attempt == 5 {
-            println!("\nUnable to connect to Zowe daemon with name = {} and pid = {} on host = {} and port = {}.",
-                daemon_proc_info.name, daemon_proc_info.pid, host, port
+            println!("\nUnable to connect to Zowe daemon with name = {} and pid = {} on socket = {}",
+                daemon_proc_info.name, daemon_proc_info.pid, daemon_socket
             );
             println!(
                 "Command = {}\nTerminating after maximum retries.",
@@ -242,7 +239,7 @@ fn establish_connection(host: String, port: String) -> std::io::Result<TcpStream
     Ok(stream)
 }
 
-fn talk(message: &[u8], stream: &mut TcpStream) -> std::io::Result<()> {
+fn talk(message: &[u8], stream: &mut UnixStream) -> std::io::Result<()> {
     /*
      * Send the command line arguments to the daemon and await responses.
      */
@@ -374,6 +371,17 @@ fn get_port_string() -> String {
     }
     let port_string = _port.to_string();
     return port_string;
+}
+
+fn get_socket_string() -> String {
+    let mut _socket = format!("{}/{}", home_dir().unwrap().as_path().display().to_string(), "zowe-daemon.sock");
+
+    match env::var("ZOWE_DAEMON_DIR") {
+        // TODO(Kelosky): handle unwrap properly
+        Ok(val) => _socket = format!("{}/{}", val, "zowe-daemon.sock"),
+        Err(_e) => _socket = format!("{}/{}", home_dir().unwrap().as_path().display().to_string(), "zowe-daemon.sock"),
+    }
+    return _socket;
 }
 
 // Get the file path to the command that runs the NodeJS version of Zowe

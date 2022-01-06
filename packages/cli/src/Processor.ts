@@ -10,6 +10,8 @@
 */
 
 import { Imperative } from "@zowe/imperative";
+import { homedir } from "os";
+import { join } from "path";
 import * as net from "net";
 import { DaemonClient } from "./DaemonClient";
 
@@ -51,12 +53,12 @@ export class Processor {
     private mServer: net.Server;
 
     /**
-     * Hold current port number for the server
+     * Hold current socket path for the server
      * @private
      * @type {number}
      * @memberof Processor
      */
-    private mPort: number;
+    private mSocket: string;
 
     /**
      * Indicator for whether or not to start the server
@@ -98,9 +100,9 @@ export class Processor {
      */
     public process() {
         if (this.mServer) {
-            this.mServer.listen(this.mPort, "127.0.0.1", () => {
-                Imperative.api.appLogger.debug(`daemon server bound ${this.mPort}`);
-                Imperative.console.info(`server bound ${this.mPort}`);
+            this.mServer.listen(this.mSocket, () => {
+                Imperative.api.appLogger.debug(`daemon server bound ${this.mSocket}`);
+                Imperative.console.info(`server bound ${this.mSocket}`);
             });
         } else {
             Imperative.parse();
@@ -134,7 +136,8 @@ export class Processor {
      */
     private initialParse() {
         const numOfParms = this.mParms.length - 2;
-        this.mPort = Processor.DEFAULT_PORT;
+        const sockName = "zowe-daemon.sock";
+        this.mSocket = join(homedir(), sockName);
 
         if (numOfParms > 0) {
             const parm = this.mParms[2];
@@ -147,14 +150,14 @@ export class Processor {
 
             if (portOffset > -1) {
                 this.startServer = true;
-                if (process.env.ZOWE_DAEMON) {
+                if (process.env.ZOWE_DAEMON_DIR) {
                     try {
-                        this.mPort = parseInt(process.env.ZOWE_DAEMON, 10);
+                        this.mSocket = join(process.env.ZOWE_DAEMON_DIR, sockName);
                     } catch (err) {
                         // do nothing
                     }
                 }
-                Imperative.api.appLogger.debug(`daemon server port ${this.mPort}`);
+                Imperative.api.appLogger.debug(`daemon server socket ${this.mSocket}`);
             }
         }
     }
