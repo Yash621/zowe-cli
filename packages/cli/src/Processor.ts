@@ -12,6 +12,7 @@
 import { Imperative } from "@zowe/imperative";
 import { homedir } from "os";
 import { join } from "path";
+import { existsSync, unlinkSync } from "fs";
 import * as net from "net";
 import { DaemonClient } from "./DaemonClient";
 
@@ -100,6 +101,23 @@ export class Processor {
      */
     public process() {
         if (this.mServer) {
+            // this.mServer.listen(this.mPort, () => {
+            let socketLoc = join(homedir(), "zowe-daemon.sock");
+            if (process.platform === 'win32') {
+                socketLoc = socketLoc.replace(/^\//, '');
+                socketLoc = socketLoc.replace(/\//g, '-');
+                socketLoc = '\\\\.\\pipe\\' + socketLoc;
+            }
+            this.mSocket = socketLoc;
+
+            if (existsSync(this.mSocket)) { unlinkSync(this.mSocket); }
+
+            process.once('exit', this.close.bind(this));
+            process.once('SIGINT', this.close.bind(this));
+            process.once('SIGQUIT', this.close.bind(this));
+            process.once('SIGTERM', this.close.bind(this));
+            process.once('SIGILL', this.close.bind(this));
+
             this.mServer.listen(this.mSocket, () => {
                 Imperative.api.appLogger.debug(`daemon server bound ${this.mSocket}`);
                 Imperative.console.info(`server bound ${this.mSocket}`);

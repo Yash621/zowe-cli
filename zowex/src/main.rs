@@ -26,7 +26,9 @@ use std::time::Duration;
 use std::os::unix::net::UnixStream;
 
 #[cfg(target_family = "windows")]
-use uds_windows::UnixStream;
+extern crate interprocess;
+#[cfg(target_family = "windows")]
+use interprocess::os::windows::named_pipe;
 
 extern crate pathsearch;
 use pathsearch::PathSearcher;
@@ -181,6 +183,7 @@ fn run_daemon_command(mut args: String) -> std::io::Result<()> {
     Ok(talk(&_resp, &mut stream)?)
 }
 
+#[cfg(target_family = "unix")]
 fn establish_connection() -> std::io::Result<UnixStream> {
     /* Attempt to make a TCP connection to the daemon.
      * Iterate to enable a slow system to start the daemon.
@@ -242,7 +245,193 @@ fn establish_connection() -> std::io::Result<UnixStream> {
     Ok(stream)
 }
 
+#[cfg(target_family = "unix")]
 fn talk(message: &[u8], stream: &mut UnixStream) -> std::io::Result<()> {
+    /*
+     * Send the command line arguments to the daemon and await responses.
+     */
+    stream.write(message).unwrap(); // write it
+    let mut stream_clone = stream.try_clone().expect("clone failed");
+
+    let mut reader = BufReader::new(&*stream);
+
+    let mut exit_code = 0;
+    let mut _progress = false;
+
+    loop {
+        let mut u_payload: Vec<u8> = Vec::new();
+        let payload: String;
+
+        // read until form feed (\f)
+        if reader.read_until(0xC, &mut u_payload).unwrap() > 0 {
+            // remove form feed and convert to a string
+            u_payload.pop(); // remove the 0xC
+            payload = str::from_utf8(&u_payload).unwrap().to_string();
+
+            let p: DaemonRequest = match serde_json::from_str(&payload) {
+                Ok(p) => p,
+                Err(_e) => {
+                    // TODO(Kelosky): handle this only if progress bar mode is active
+                    print!("{}", payload);
+                    io::stdout().flush().unwrap();
+                    DaemonRequest {
+                        stdout: None,
+                        stderr: None,
+                        exitCode: Some(0i32),
+                        progress: None,
+                        prompt: None,
+                        securePrompt: None,
+                    }
+                }
+            };
+
+            match p.stdout {
+                Some(s) => {
+                    print!("{}", s);
+                    io::stdout().flush().unwrap();
+                }
+                None => (), // do nothing
+            }
+
+            match p.stderr {
+                Some(s) => {
+                    eprint!("{}", s);
+                    io::stdout().flush().unwrap();
+                }
+                None => (), // do nothing
+            }
+
+            match p.prompt {
+                Some(s) => {
+                    print!("{}", s);
+                    io::stdout().flush().unwrap();
+                    let mut reply = String::new();
+                    io::stdin().read_line(&mut reply).unwrap();
+                    let response: DaemonResponse = DaemonResponse {
+                        reply,
+                        id: X_ZOWE_DAEMON_REPLY.to_string(),
+                    };
+                    let v = serde_json::to_string(&response)?;
+
+                    stream_clone.write(v.as_bytes()).unwrap();
+                }
+                None => (), // do nothing
+            }
+
+            match p.securePrompt {
+                Some(s) => {
+                    print!("{}", s);
+                    io::stdout().flush().unwrap();
+                    let reply;
+                    reply = read_password().unwrap();
+                    let response: DaemonResponse = DaemonResponse {
+                        reply,
+                        id: X_ZOWE_DAEMON_REPLY.to_string(),
+                    };
+                    let v = serde_json::to_string(&response)?;
+                    stream_clone.write(v.as_bytes()).unwrap();
+                }
+                None => (), // do nothing
+            }
+
+            exit_code = match p.exitCode {
+                Some(s) => s,
+                None => 0, // do nothing
+            };
+
+            _progress = match p.progress {
+                Some(s) => s,
+                None => false, // do nothing
+            };
+        } else {
+            // end of reading
+            break;
+        }
+    }
+
+    // Terminate connection. Ignore NotConnected errors returned on macOS.
+    // https://doc.rust-lang.org/std/net/struct.TcpStream.html#method.shutdown
+    match stream.shutdown(Shutdown::Read) {
+        Err(ref e) if e.kind() == std::io::ErrorKind::NotConnected => (),
+        result => result?,
+    }
+    match stream.shutdown(Shutdown::Write) {
+        Err(ref e) if e.kind() == std::io::ErrorKind::NotConnected => (),
+        result => result?,
+    }
+
+    // TODO(Kelosky): maybe this should just be a `return Err`
+    if exit_code != 0 {
+        std::process::exit(exit_code);
+    }
+
+    Ok(())
+}
+
+#[cfg(target_family = "windows")]
+fn establish_connection() -> std::io::Result<named_pipe::PipeStream> {
+    /* Attempt to make a TCP connection to the daemon.
+     * Iterate to enable a slow system to start the daemon.
+     */
+    let daemon_socket = get_socket_string();
+    let mut conn_attempt = 1;
+    let mut we_started_daemon = false;
+    let mut cmd_to_show: String = String::new();
+    let stream = loop {
+        let conn_result = named_pipe::connect(&daemon_socket);
+        if let Ok(good_stream) = conn_result {
+            // We made our connection. Break with the actual stream value
+            break good_stream;
+        }
+
+        // determine if daemon is running
+        let daemon_proc_info = is_daemon_running();
+
+        // when not running, start it.
+        if daemon_proc_info.is_running == false {
+            if conn_attempt == 1 {
+                // start the daemon and continue trying to connect
+                let njs_zowe_path = get_nodejs_zowe_path();
+                we_started_daemon = true;
+                cmd_to_show = start_daemon(&njs_zowe_path);
+            } else {
+                if we_started_daemon {
+                    println!("The Zowe daemon that we started is not running on socket: {}.",
+                        daemon_socket
+                    );
+                    println!(
+                        "Command used to start the Zowe daemon was:\n    {}\nTerminating.",
+                        cmd_to_show
+                    );
+                    std::process::exit(EXIT_CODE_DEAMON_NOT_RUNNING_AFTER_START);
+                }
+            }
+        }
+
+        if conn_attempt == 5 {
+            println!("\nUnable to connect to Zowe daemon with name = {} and pid = {} on socket = {}",
+                daemon_proc_info.name, daemon_proc_info.pid, daemon_socket
+            );
+            println!(
+                "Command = {}\nTerminating after maximum retries.",
+                daemon_proc_info.cmd
+            );
+            std::process::exit(EXIT_CODE_CANNOT_CONNECT_TO_RUNNING_DAEMON);
+        }
+
+        // pause between attempts to connect
+        thread::sleep(Duration::from_secs(3));
+        if conn_attempt == 1 && we_started_daemon == false || conn_attempt > 1 {
+            println!("Attempting to connect to Zowe daemon again ...");
+        }
+        conn_attempt = conn_attempt + 1;
+    };
+
+    Ok(stream)
+}
+
+#[cfg(target_family = "windows")]
+fn talk(message: &[u8], stream: &mut named_pipe::PipeStream) -> std::io::Result<()> {
     /*
      * Send the command line arguments to the daemon and await responses.
      */
